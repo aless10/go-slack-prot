@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io/ioutil"
 	"log"
 	"net/http"
 
@@ -96,14 +97,18 @@ type GithubResponse struct {
 
 func githubPrHandler(w http.ResponseWriter, r *http.Request) {
 	defer r.Body.Close()
-	decoder := json.NewDecoder(r.Body)
 	var t GithubResponse
-	err := decoder.Decode(&t)
+	body, err := ioutil.ReadAll(r.Body)
 	if err != nil {
+		panic(err.Error())
+	}
+	err_2 := json.Unmarshal([]byte(body), &t)
+
+	if err_2 != nil {
 		panic(err)
 	}
-	log.Println(t.State)
-	log.Println(t.Number)
+	log.Println(t)
+
 	/* buf := new(bytes.Buffer)
 	buf.ReadFrom(r.Body)
 	body := buf.String()
