@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 
 	"github.com/nlopes/slack/slackevents"
@@ -24,6 +25,7 @@ type Message struct {
 }
 
 func messageHandler(w http.ResponseWriter, r *http.Request) {
+	defer r.Body.Close()
 	message := Message{}
 	decoder := json.NewDecoder(r.Body)
 	err := decoder.Decode(&message)
@@ -57,8 +59,8 @@ func messageHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 type InChannelResponse struct {
-	text          string
-	response_type string
+	Text         string `json:"text"`
+	ResponseType string `json:"response_type"`
 }
 
 func pingHandler(w http.ResponseWriter, r *http.Request) {
@@ -73,16 +75,9 @@ func pingHandler(w http.ResponseWriter, r *http.Request) {
 	w.Write(js)
 }
 
-type Profile struct {
-	Text          string
-	response_type string
-	Pippo         string
-}
-
-func foo(w http.ResponseWriter, r *http.Request) {
-	profile := Profile{"Alex", "in_channel", "Pluto"}
-
-	js, err := json.Marshal(profile)
+func helloHandler(w http.ResponseWriter, r *http.Request) {
+	response := InChannelResponse{"HELLO CHARLY", "in_channel"}
+	js, err := json.Marshal(response)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -92,10 +87,34 @@ func foo(w http.ResponseWriter, r *http.Request) {
 	w.Write(js)
 }
 
+type GithubResponse struct {
+	HTMLUrl string `json:"html_url"`
+	Number  int    `json:"number"`
+	State   string `json:"state"`
+	Body    string `json:"body"`
+}
+
+func githubPrHandler(w http.ResponseWriter, r *http.Request) {
+	defer r.Body.Close()
+	decoder := json.NewDecoder(r.Body)
+	var t GithubResponse
+	err := decoder.Decode(&t)
+	if err != nil {
+		panic(err)
+	}
+	log.Println(t.State)
+	log.Println(t.Number)
+	/* buf := new(bytes.Buffer)
+	buf.ReadFrom(r.Body)
+	body := buf.String()
+	fmt.Println("PR body: ", body) */
+}
+
 func registerEndpoints() {
 	http.HandleFunc("/message", messageHandler)
-	http.HandleFunc("/", foo)
-	http.HandleFunc("/foo", foo)
+	http.HandleFunc("/github-pr", githubPrHandler)
+	http.HandleFunc("/", pingHandler)
+	http.HandleFunc("/hello", helloHandler)
 }
 
 // RunServer This is the server runner

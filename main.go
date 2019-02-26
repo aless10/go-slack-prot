@@ -20,6 +20,6 @@ var Config = configuration{
 var api = slack.New(Config.SlackBotToken)
 
 func main() {
-	fmt.Print("Running The server")
+	fmt.Print("Running The server\n")
 	RunServer()
 }
