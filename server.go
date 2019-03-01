@@ -1,8 +1,10 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/nlopes/slack"
 	"io/ioutil"
 	"log"
 	"net/http"
@@ -17,28 +19,32 @@ type Label struct {
 	LabelName string `json:"name"`
 }
 
-type Message struct {
-	//ChannelID   string `json:"channel_id"`
-	//ChannelName string `json:"channel_name"`
-	//Command     string `json:"command"`
-	Text string `json:"text"`
-	//UserID      string `json:"user_id"`
-	UserName string `json:"user_name"`
-}
-
-func messageHandler(w http.ResponseWriter, r *http.Request) {
-	defer r.Body.Close()
-	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	err := r.ParseForm()
-
+func commandHandler(w http.ResponseWriter, r *http.Request) {
+	command, err := slack.SlashCommandParse(r)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	user, err := Api.GetUserInfo(command.UserID)
+	if err != nil {
+		log.Fatalf("User with ID %s not found", command.UserID)
+	}
+	fmt.Printf("%v:%v\n", "UserEmail", user.Profile.Email)
 
-	fmt.Printf("%v:%v\n", "Userid", r.Form.Get("user_id"))
-	user_id := r.Form.Get("user_id")
-	response := InChannelResponse{user_id, "in_channel"}
+	// 1. For all the repos
+	repos, _, err := githubClient.Repositories.List(context.Background(), "", nil)
+	for i, repo := range repos {
+		fmt.Println(i, repo.GetPullsURL())
+	}
+	//for j, pr := range repo.GetP {
+	//	log.Println(j, pr["html_url"], pr)
+	//}
+	// 2. For all the PR
+	// 3. if user.Profile.Email in requested_reviewers email -> append PR info to a list
+	// 4. Return the list to slack
+	//x, _, err := githubClient.PullRequests.ListReviewers(ctx, owner, repo, number, opt *ListOptions)
+
+	response := InChannelResponse{user.Profile.FirstName, "in_channel"}
 	js, err := json.Marshal(response)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -46,13 +52,11 @@ func messageHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	w.Write(js)
-	// user, err := api.GetUseName(message.)
-	// if err != nil {
-	// 	fmt.Printf("%s\n", err)
-	// 	return
-	// }
-	// fmt.Printf("ID: %s, Fullname: %s, Email: %s\n", user.ID, user.Profile.RealName, user.Profile.Email)
+	_, err = w.Write(js)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
 }
 
 type InChannelResponse struct {
@@ -69,7 +73,11 @@ func pingHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	w.Write(js)
+	_, err = w.Write(js)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
 }
 
 func helloHandler(w http.ResponseWriter, r *http.Request) {
@@ -81,7 +89,11 @@ func helloHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	w.Write(js)
+	_, err = w.Write(js)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
 }
 
 type PullRequest struct {
@@ -127,7 +139,7 @@ func githubPrHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func getUserByEmail(email string) {
-	user, err := api.GetUserByEmail(email)
+	user, err := Api.GetUserByEmail(email)
 	if err != nil {
 		fmt.Printf("%s\n", err)
 		return
@@ -136,7 +148,7 @@ func getUserByEmail(email string) {
 }
 
 func registerEndpoints() {
-	http.HandleFunc("/message", messageHandler)
+	http.HandleFunc("/message", commandHandler)
 	http.HandleFunc("/github-pr", githubPrHandler)
 	http.HandleFunc("/", pingHandler)
 	http.HandleFunc("/hello", helloHandler)
@@ -145,5 +157,8 @@ func registerEndpoints() {
 // RunServer This is the server runner
 func RunServer() {
 	registerEndpoints()
-	http.ListenAndServe(":8000", nil)
+	err := http.ListenAndServe(":8080", nil)
+	if err != nil {
+		log.Fatal(err)
+	}
 }
