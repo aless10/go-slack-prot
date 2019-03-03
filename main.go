@@ -39,13 +39,26 @@ func createGithubClient() *github.Client {
 
 var githubClient = createGithubClient()
 
+type GithubResponse struct {
+	PullRequestList []github.PullRequest
+	SlackUser       *SubscribedUser
+}
+
+var ProtSubscribedUsers = make(map[string]SubscribedUser)
+
+type SubscribedUser struct {
+	SlackUserID    string
+	SlackChannelId string
+	GithubUser     string
+}
+
 func commandHandler(w http.ResponseWriter, r *http.Request) {
 	command, err := slack.SlashCommandParse(r)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	user, err := Api.GetUserInfo(command.UserID)
+	user, err := getUserByID(command.UserID)
 	if err != nil {
 		log.Fatalf("User with ID %s not found", command.UserID)
 	}
@@ -62,15 +75,17 @@ func commandHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		for _, pull := range pullsList {
 			// 3. if user.Profile.Email in requested_reviewers email -> append PR info to a list
+			// TODO remove this assignement
+			// githubResponse.PullRequestList := append(githubResponse.PullRequestList, *pull)
 			for _, assignee := range pull.Assignees {
 				log.Println(assignee)
-				uResp, _, err := githubClient.Users.Get(context.Background(), *assignee.Login)
+
 				if err != nil {
 					http.Error(w, err.Error(), http.StatusInternalServerError)
 					return
 				}
-				log.Println(uResp)
-				if *assignee.Email == user.Profile.Email {
+
+				if *assignee.Login == user.GithubUser {
 					log.Println("Yes")
 				}
 
@@ -80,8 +95,7 @@ func commandHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 4. Return the list to slack
-
-	response := InChannelResponse{user.Profile.FirstName, "in_channel"}
+	response := InChannelResponse{"Done", "in_channel"}
 	js, err := json.Marshal(response)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -99,6 +113,46 @@ func commandHandler(w http.ResponseWriter, r *http.Request) {
 type InChannelResponse struct {
 	Text         string `json:"text"`
 	ResponseType string `json:"response_type"`
+}
+
+func subscribeHandler(w http.ResponseWriter, r *http.Request) {
+	command, err := slack.SlashCommandParse(r)
+	if err != nil {
+		log.Println(err)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	user, exists := ProtSubscribedUsers[command.UserID]
+	if !exists {
+
+		newUser := SubscribedUser{
+			SlackUserID:    command.UserID,
+			SlackChannelId: command.ChannelID,
+			GithubUser:     command.Text,}
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		ProtSubscribedUsers[newUser.SlackUserID] = newUser
+		response := InChannelResponse{"User added", "in_channel"}
+		js, err := json.Marshal(response)
+		w.Header().Set("Content-Type", "application/json")
+		_, err = w.Write(js)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+	} else {
+		w.Header().Set("Content-Type", "application/json")
+		msgText := fmt.Sprintf("%s Already subscribed", user.GithubUser)
+		response := InChannelResponse{msgText, "in_channel"}
+		js, err := json.Marshal(response)
+		_, err = w.Write(js)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+	}
 }
 
 func pingHandler(w http.ResponseWriter, r *http.Request) {
@@ -133,9 +187,32 @@ func helloHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+type PullRequest struct {
+	HTMLUrl            string        `json:"html_url"`
+	Number             int           `json:"number"`
+	State              string        `json:"state"`
+	ByUser             github.User   `json:"user"`
+	Body               string        `json:"body"`
+	Labels             []Label       `json:"labels"`
+	CreatedAt          string        `json:"created_at"`
+	UpdatedAt          string        `json:"updated_at"`
+	Assignee           github.User   `json:"assignee"`
+	Assignees          []github.User `json:"assignees"`
+	RequestedReviewers []github.User `json:"requested_reviewers"`
+}
+
+type Label struct {
+	LabelName string `json:"name"`
+}
+
+type GithubPResponse struct {
+	Action string      `json:"action"`
+	PR     PullRequest `json:"pull_request"`
+}
+
 func githubPrHandler(w http.ResponseWriter, r *http.Request) {
 	defer r.Body.Close()
-	var t github.PullRequest
+	var t GithubPResponse
 	body, err := ioutil.ReadAll(r.Body)
 	if err != nil {
 		log.Fatal(err)
@@ -145,41 +222,58 @@ func githubPrHandler(w http.ResponseWriter, r *http.Request) {
 	if jsonErr != nil {
 		log.Fatal(jsonErr)
 	}
-	log.Println(t)
-	for _, reviewer := range t.Assignees {
+	for _, reviewer := range t.PR.Assignees {
 		log.Println(reviewer)
 	}
 	// To delete when reviewers are available
-	assignee := t.Assignee
+	assignee := t.PR.Assignee
 	log.Println(assignee)
-	user, err := getUserByEmail(*assignee.Email)
-	log.Println(user.Profile.Email)
+	user, err := getUserGithubName(*assignee.Login)
+	log.Println(user)
 	if err != nil {
 		log.Println(err)
 	}
-	//w.Header().Set("Content-Type", "application/json")
-	//response := InChannelResponse{t.Body, "in_channel"}
-	//js, err := json.Marshal(response)
-	//w.Write(js)
-	//if err != nil {
-	//	http.Error(w, err.Error(), http.StatusInternalServerError)
-	//	return
-	//}
+
+	msgOptions := slack.MsgOptionText("PR update", true)
+	msgAttachments := slack.MsgOptionAttachments(slack.Attachment{Title: "PR",
+		TitleLink: t.PR.HTMLUrl,
+		Pretext:   fmt.Sprintf("Made By %s", *t.PR.ByUser.Login),
+		Text:      t.PR.Body,
+	})
+
+	respChannel, _, err := Api.PostMessage(user.SlackChannelId, msgOptions, msgAttachments)
+	if err != nil {
+		log.Println(err)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	log.Println(respChannel)
 
 }
 
-func getUserByEmail(email string) (*slack.User, error) {
-	user, err := Api.GetUserByEmail(email)
-	if err != nil {
-		log.Println(err)
-		return &slack.User{}, err
+func getUserByID(id string) (SubscribedUser, error) {
+	return ProtSubscribedUsers[id], nil
+
+}
+
+func getUserGithubName(login string) (SubscribedUser, error) {
+
+	for _, subscribedUser := range ProtSubscribedUsers {
+		user, err := getUserByID(subscribedUser.SlackUserID)
+		if err != nil {
+			log.Println(err)
+		}
+		if user.GithubUser == login {
+			return user, nil
+		}
 	}
-	log.Println(user.ID, user.Profile.RealName, user.Profile.Email)
-	return user, nil
+	nullUser := SubscribedUser{}
+	return nullUser, nil
 }
 
 func registerEndpoints() {
 	http.HandleFunc("/message", commandHandler)
+	http.HandleFunc("/subscribe", subscribeHandler)
 	http.HandleFunc("/github-pr", githubPrHandler)
 	http.HandleFunc("/", pingHandler)
 	http.HandleFunc("/hello", helloHandler)
