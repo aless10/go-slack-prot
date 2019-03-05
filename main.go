@@ -58,6 +58,20 @@ func commandHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	// 0. Return the response to slack
+	response := InChannelResponse{"Request Received!", "in_channel"}
+	js, err := json.Marshal(response)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_, err = w.Write(js)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
 	user, err := getUserByID(command.UserID)
 	if err != nil {
 		log.Fatalf("User with ID %s not found", command.UserID)
@@ -87,26 +101,19 @@ func commandHandler(w http.ResponseWriter, r *http.Request) {
 
 				if *assignee.Login == user.GithubUser {
 					log.Println("Yes")
+					option, attachments := pull.makeMessage()
+					log.Println(option)
+					log.Println(attachments)
 				}
 
 			}
 
 		}
-	}
 
-	// 4. Return the list to slack
-	response := InChannelResponse{"Done", "in_channel"}
-	js, err := json.Marshal(response)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	_, err = w.Write(js)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
+		for _, reviewer := range t.PR.Assignees {
+			log.Println(reviewer)
+			go sendMessage(w, reviewer, *option, *attachments)
+		}
 	}
 }
 
@@ -171,43 +178,64 @@ func pingHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func helloHandler(w http.ResponseWriter, r *http.Request) {
-	response := InChannelResponse{"HELLO CHARLY", "in_channel"}
-	js, err := json.Marshal(response)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	_, err = w.Write(js)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
+type PrBaseInfo struct {
+	Repo github.Repository `json:"repo"`
+	Ref  string            `json:"ref"`
 }
 
-type PullRequest struct {
-	HTMLUrl            string        `json:"html_url"`
-	Number             int           `json:"number"`
-	State              string        `json:"state"`
-	ByUser             github.User   `json:"user"`
-	Body               string        `json:"body"`
-	Labels             []Label       `json:"labels"`
-	CreatedAt          string        `json:"created_at"`
-	UpdatedAt          string        `json:"updated_at"`
-	Assignee           github.User   `json:"assignee"`
-	Assignees          []github.User `json:"assignees"`
-	RequestedReviewers []github.User `json:"requested_reviewers"`
-}
+type PullRequest github.PullRequest
+//{
+//	HTMLUrl            string        `json:"html_url"`
+//	Title              string        `json:"title"`
+//	Base               PrBaseInfo    `json:"base"`
+//	Number             int           `json:"number"`
+//	State              string        `json:"state"`
+//	ByUser             github.User   `json:"user"`
+//	Body               string        `json:"body"`
+//	Labels             []Label       `json:"labels"`
+//	CreatedAt          string        `json:"created_at"`
+//	UpdatedAt          string        `json:"updated_at"`
+//	Assignee           github.User   `json:"assignee"`
+//	Assignees          []github.User `json:"assignees"`
+//	RequestedReviewers []github.User `json:"requested_reviewers"`
+//}
 
-type Label struct {
-	LabelName string `json:"name"`
-}
 
 type GithubPResponse struct {
 	Action string      `json:"action"`
 	PR     PullRequest `json:"pull_request"`
+}
+
+func (pr *PullRequest) makeMessage() (*slack.MsgOption, *slack.MsgOption) {
+	labelInfo := github.Label{}
+	if len(pr.Labels) == 0 {
+		// Todo fix this assignment
+		*labelInfo.Name = fmt.Sprintf("No Label Added")
+		*labelInfo.Color = fmt.Sprintf(`green`)
+	} else {
+		labelInfo.Name = pr.Labels[0].Name
+		labelInfo.Color = pr.Labels[0].Color
+	}
+
+	msgOptionText := fmt.Sprintf("%s requests your review on this PR", *pr.User.Login)
+	msgOptions := slack.MsgOptionText(msgOptionText, true)
+	msgAttText := fmt.Sprintf("%s\n Repo: %s\n Label: %s", *pr.Base.Repo.Name, *pr.HTMLURL, *labelInfo.Name)
+	msgAttachments := slack.MsgOptionAttachments(slack.Attachment{Title: *pr.Title,
+		Text:  msgAttText,
+		Color: *labelInfo.Color,
+	})
+	return &msgOptions, &msgAttachments
+}
+
+func sendMessage(w http.ResponseWriter, rev github.User, options, attachments slack.MsgOption) {
+	user, err := getUserGithubName(*rev.Login)
+	respChannel, _, err := Api.PostMessage(user.SlackChannelId, options, attachments)
+	if err != nil {
+		log.Println(err)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	log.Println(respChannel)
 }
 
 func githubPrHandler(w http.ResponseWriter, r *http.Request) {
@@ -222,33 +250,13 @@ func githubPrHandler(w http.ResponseWriter, r *http.Request) {
 	if jsonErr != nil {
 		log.Fatal(jsonErr)
 	}
+	option, attachments := t.PR.makeMessage()
+	log.Println(option)
+
 	for _, reviewer := range t.PR.Assignees {
 		log.Println(reviewer)
+		go sendMessage(w, *reviewer, *option, *attachments)
 	}
-	// To delete when reviewers are available
-	assignee := t.PR.Assignee
-	log.Println(assignee)
-	user, err := getUserGithubName(*assignee.Login)
-	log.Println(user)
-	if err != nil {
-		log.Println(err)
-	}
-
-	msgOptions := slack.MsgOptionText("PR update", true)
-	msgAttachments := slack.MsgOptionAttachments(slack.Attachment{Title: "PR",
-		TitleLink: t.PR.HTMLUrl,
-		Pretext:   fmt.Sprintf("Made By %s", *t.PR.ByUser.Login),
-		Text:      t.PR.Body,
-	})
-
-	respChannel, _, err := Api.PostMessage(user.SlackChannelId, msgOptions, msgAttachments)
-	if err != nil {
-		log.Println(err)
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	log.Println(respChannel)
-
 }
 
 func getUserByID(id string) (SubscribedUser, error) {
@@ -276,7 +284,6 @@ func registerEndpoints() {
 	http.HandleFunc("/subscribe", subscribeHandler)
 	http.HandleFunc("/github-pr", githubPrHandler)
 	http.HandleFunc("/", pingHandler)
-	http.HandleFunc("/hello", helloHandler)
 }
 
 // RunServer This is the server runner
