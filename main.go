@@ -11,6 +11,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
 )
 
 type configuration struct {
@@ -40,7 +41,7 @@ func createGithubClient() *github.Client {
 var githubClient = createGithubClient()
 
 type GithubResponse struct {
-	PullRequestList []github.PullRequest
+	PullRequestList []*github.PullRequest
 	SlackUser       *SubscribedUser
 }
 
@@ -53,68 +54,82 @@ type SubscribedUser struct {
 }
 
 func commandHandler(w http.ResponseWriter, r *http.Request) {
-	command, err := slack.SlashCommandParse(r)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
 	// 0. Return the response to slack
-	response := InChannelResponse{"Request Received!", "in_channel"}
-	js, err := json.Marshal(response)
+	reader := strings.NewReader("Hello, Reader!")
+
+	b := make([]byte, 8)
+	_, err := reader.Read(b)
+	log.Println(err)
+	http.Post("https://hooks.slack.com/services/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", "application/json", reader)
+
+	//okResponse := InChannelResponse{"Request Received!", "in_channel"}
+	//js, err := json.Marshal(okResponse)
+	//if err != nil {
+	//	http.Error(w, err.Error(), http.StatusInternalServerError)
+	//	return
+	//}
+	//
+	//w.Header().Set("Content-Type", "application/json")
+	//w.WriteHeader(http.StatusOK)
+	//_, err = w.Write(js)
+
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-
-	w.Header().Set("Content-Type", "application/json")
-	_, err = w.Write(js)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	user, err := getUserByID(command.UserID)
-	if err != nil {
-		log.Fatalf("User with ID %s not found", command.UserID)
-	}
-
-	// 1. For all the repos
-	repos, _, err := githubClient.Repositories.List(context.Background(), "", nil)
-	for _, repo := range repos {
-		owner := repo.Owner.Login
-		repoName := repo.Name
-		pullsList, _, err := githubClient.PullRequests.List(context.Background(), *owner, *repoName, &github.PullRequestListOptions{State: "open"})
+	go func(w http.ResponseWriter, r *http.Request) {
+		command, err := slack.SlashCommandParse(r)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		for _, pull := range pullsList {
-			// 3. if user.Profile.Email in requested_reviewers email -> append PR info to a list
-			// TODO remove this assignement
-			// githubResponse.PullRequestList := append(githubResponse.PullRequestList, *pull)
-			for _, assignee := range pull.Assignees {
-				log.Println(assignee)
 
-				if err != nil {
-					http.Error(w, err.Error(), http.StatusInternalServerError)
-					return
-				}
+		user, err := getUserByID(command.UserID)
+		if err != nil {
+			log.Fatalf("User with ID %s not found", command.UserID)
+		}
+		response := GithubResponse{SlackUser: &user}
 
-				if *assignee.Login == user.GithubUser {
-					log.Println("Yes")
-					option, attachments := pull.makeMessage()
-					log.Println(option)
-					log.Println(attachments)
+		// 1. For all the repos
+		repos, _, err := githubClient.Repositories.List(context.Background(), "", nil)
+		for _, repo := range repos {
+			owner := repo.Owner.Login
+			repoName := repo.Name
+			pullsList, _, err := githubClient.PullRequests.List(context.Background(), *owner, *repoName, &github.PullRequestListOptions{State: "open"})
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			for _, pull := range pullsList {
+				// TODO remove this assignement, range over pull.RequestedReviewers
+				for _, assignee := range pull.Assignees {
+					log.Println(assignee)
+
+					if err != nil {
+						http.Error(w, err.Error(), http.StatusInternalServerError)
+						return
+					}
+
+					if *assignee.Login == user.GithubUser {
+						log.Println("Yes")
+						response.PullRequestList = append(response.PullRequestList, pull)
+					}
+
 				}
 
 			}
 
 		}
-
-		for _, reviewer := range t.PR.Assignees {
-			log.Println(reviewer)
-			go sendMessage(w, reviewer, *option, *attachments)
-		}
-	}
+		log.Println(response.PullRequestList)
+		msgOptionText := fmt.Sprintf("These are PR that you have to review")
+		msgOptions := slack.MsgOptionText(msgOptionText, true)
+		msgAttText := fmt.Sprintf("Repo")
+		msgAttachments := slack.MsgOptionAttachments(slack.Attachment{Title: "Title",
+			Text:  msgAttText,
+			Color: "green",
+		})
+		sendMessage(w, user.SlackChannelId, msgOptions, msgAttachments)
+	}(w, r)
 }
 
 type InChannelResponse struct {
@@ -178,28 +193,7 @@ func pingHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-type PrBaseInfo struct {
-	Repo github.Repository `json:"repo"`
-	Ref  string            `json:"ref"`
-}
-
 type PullRequest github.PullRequest
-//{
-//	HTMLUrl            string        `json:"html_url"`
-//	Title              string        `json:"title"`
-//	Base               PrBaseInfo    `json:"base"`
-//	Number             int           `json:"number"`
-//	State              string        `json:"state"`
-//	ByUser             github.User   `json:"user"`
-//	Body               string        `json:"body"`
-//	Labels             []Label       `json:"labels"`
-//	CreatedAt          string        `json:"created_at"`
-//	UpdatedAt          string        `json:"updated_at"`
-//	Assignee           github.User   `json:"assignee"`
-//	Assignees          []github.User `json:"assignees"`
-//	RequestedReviewers []github.User `json:"requested_reviewers"`
-//}
-
 
 type GithubPResponse struct {
 	Action string      `json:"action"`
@@ -227,9 +221,8 @@ func (pr *PullRequest) makeMessage() (*slack.MsgOption, *slack.MsgOption) {
 	return &msgOptions, &msgAttachments
 }
 
-func sendMessage(w http.ResponseWriter, rev github.User, options, attachments slack.MsgOption) {
-	user, err := getUserGithubName(*rev.Login)
-	respChannel, _, err := Api.PostMessage(user.SlackChannelId, options, attachments)
+func sendMessage(w http.ResponseWriter, channelId string, options, attachments slack.MsgOption) {
+	respChannel, _, err := Api.PostMessage(channelId, options, attachments)
 	if err != nil {
 		log.Println(err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -254,8 +247,11 @@ func githubPrHandler(w http.ResponseWriter, r *http.Request) {
 	log.Println(option)
 
 	for _, reviewer := range t.PR.Assignees {
-		log.Println(reviewer)
-		go sendMessage(w, *reviewer, *option, *attachments)
+		user, err := getUserGithubName(*reviewer.Login)
+		if err != nil {
+			log.Println(err)
+		}
+		go sendMessage(w, user.SlackChannelId, *option, *attachments)
 	}
 }
 
