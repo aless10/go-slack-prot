@@ -11,7 +11,6 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"strings"
 )
 
 type configuration struct {
@@ -53,83 +52,85 @@ type SubscribedUser struct {
 	GithubUser     string
 }
 
+func okJSONHandler(rw http.ResponseWriter, r *http.Request) error {
+	rw.Header().Set("Content-Type", "application/json")
+	response, _ := json.Marshal(slack.SlackResponse{
+		Ok: true,
+	})
+	_, err := rw.Write(response)
+
+	return err
+}
+
 func commandHandler(w http.ResponseWriter, r *http.Request) {
 	// 0. Return the response to slack
-	reader := strings.NewReader("Hello, Reader!")
-
-	b := make([]byte, 8)
-	_, err := reader.Read(b)
-	log.Println(err)
-	http.Post("https://hooks.slack.com/services/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", "application/json", reader)
-
-	//okResponse := InChannelResponse{"Request Received!", "in_channel"}
-	//js, err := json.Marshal(okResponse)
-	//if err != nil {
-	//	http.Error(w, err.Error(), http.StatusInternalServerError)
-	//	return
-	//}
-	//
-	//w.Header().Set("Content-Type", "application/json")
-	//w.WriteHeader(http.StatusOK)
-	//_, err = w.Write(js)
+	err := okJSONHandler(w, r)
 
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	go func(w http.ResponseWriter, r *http.Request) {
-		command, err := slack.SlashCommandParse(r)
+
+	command, err := slack.SlashCommandParse(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	log.Println(command)
+	//go func(w http.ResponseWriter, r *http.Request) {
+	//	command, err := slack.SlashCommandParse(r)
+	//	if err != nil {
+	//		http.Error(w, err.Error(), http.StatusInternalServerError)
+	//		return
+	//	}
+	//
+	user, err := getUserByID(command.UserID)
+	if err != nil {
+		log.Fatalf("User with ID %s not found", command.UserID)
+	}
+	response := GithubResponse{SlackUser: &user}
+
+	// 1. For all the repos
+	repos, _, err := githubClient.Repositories.List(context.Background(), "", nil)
+	for _, repo := range repos {
+		owner := repo.Owner.Login
+		repoName := repo.Name
+		pullsList, _, err := githubClient.PullRequests.List(context.Background(), *owner, *repoName, &github.PullRequestListOptions{State: "open"})
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
+		for _, pull := range pullsList {
+			// TODO remove this assignement, range over pull.RequestedReviewers
+			for _, assignee := range pull.Assignees {
+				log.Println(assignee)
 
-		user, err := getUserByID(command.UserID)
-		if err != nil {
-			log.Fatalf("User with ID %s not found", command.UserID)
-		}
-		response := GithubResponse{SlackUser: &user}
+				if err != nil {
+					http.Error(w, err.Error(), http.StatusInternalServerError)
+					return
+				}
 
-		// 1. For all the repos
-		repos, _, err := githubClient.Repositories.List(context.Background(), "", nil)
-		for _, repo := range repos {
-			owner := repo.Owner.Login
-			repoName := repo.Name
-			pullsList, _, err := githubClient.PullRequests.List(context.Background(), *owner, *repoName, &github.PullRequestListOptions{State: "open"})
-			if err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
-				return
-			}
-			for _, pull := range pullsList {
-				// TODO remove this assignement, range over pull.RequestedReviewers
-				for _, assignee := range pull.Assignees {
-					log.Println(assignee)
-
-					if err != nil {
-						http.Error(w, err.Error(), http.StatusInternalServerError)
-						return
-					}
-
-					if *assignee.Login == user.GithubUser {
-						log.Println("Yes")
-						response.PullRequestList = append(response.PullRequestList, pull)
-					}
-
+				if *assignee.Login == user.GithubUser {
+					log.Println("Yes")
+					response.PullRequestList = append(response.PullRequestList, pull)
 				}
 
 			}
 
 		}
-		log.Println(response.PullRequestList)
-		msgOptionText := fmt.Sprintf("These are PR that you have to review")
-		msgOptions := slack.MsgOptionText(msgOptionText, true)
-		msgAttText := fmt.Sprintf("Repo")
-		msgAttachments := slack.MsgOptionAttachments(slack.Attachment{Title: "Title",
-			Text:  msgAttText,
-			Color: "green",
-		})
-		sendMessage(w, user.SlackChannelId, msgOptions, msgAttachments)
-	}(w, r)
+
+	}
+	log.Println(response.PullRequestList)
+	msgOptionText := fmt.Sprintf("These are PR that you have to review")
+	msgOptions := slack.MsgOptionText(msgOptionText, true)
+	msgAttText := fmt.Sprintf("Repo")
+	msgAttachments := slack.MsgOptionAttachments(slack.Attachment{Title: "Title",
+		Text:  msgAttText,
+		Color: "green",
+	})
+	sendMessage(w, user.SlackChannelId, msgOptions, msgAttachments)
+	//}(w, r)
 }
 
 type InChannelResponse struct {
