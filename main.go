@@ -46,6 +46,15 @@ type GithubResponse struct {
 
 var ProtSubscribedUsers = make(map[string]SubscribedUser)
 
+type ProtSubscribedUsersMap map[string]SubscribedUser
+
+
+func subscribeUser() *ProtSubscribedUsersMap {
+
+
+}
+
+
 type SubscribedUser struct {
 	SlackUserID    string
 	SlackChannelId string
@@ -219,8 +228,8 @@ func makeMessage(pr *github.PullRequest) (*slack.MsgOption, *slack.MsgOption) {
 	return &msgOptions, &msgAttachments
 }
 
-func sendMessage(channelId string, options, attachments slack.MsgOption) {
-	respChannel, _, err := Api.PostMessage(channelId, options, attachments)
+func sendMessage(channelId string, options ...slack.MsgOption) {
+	respChannel, _, err := Api.PostMessage(channelId, options...)
 	if err != nil {
 		log.Println(err)
 		return
