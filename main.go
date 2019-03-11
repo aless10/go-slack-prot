@@ -102,25 +102,27 @@ func sendResponse(command slack.SlashCommand) {
 
 }
 
+func sendResponseHandler(w http.ResponseWriter, r *http.Request) {
+	log.Println("HEre we are baby")
+	command, err := slack.SlashCommandParse(r)
+	if err != nil {
+		log.Println(err)
+	}
+	log.Println(command)
+}
+
 func commandHandler(w http.ResponseWriter, r *http.Request) {
 	// 0. Return the response to slack
-	w.WriteHeader(http.StatusOK)
-	go okJSONHandler(w, r)
+	defer r.Body.Close()
+	err := okJSONHandler(w, r)
 	command, err := slack.SlashCommandParse(r)
-	//go slack.PostWebhook(command.ResponseURL, &slack.WebhookMessage{Text: "Ciao"})
-	//time.Sleep(time.Second * 5)
-	//go slack.PostWebhook(command.ResponseURL, &slack.WebhookMessage{Text: "Ciao_2"})
-	//err = okJSONHandler(w, r)
 
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	log.Println(command.ResponseURL)
+	go sendResponse(command)
 
-	//go slack.PostWebhook(command.ResponseURL, &slack.WebhookMessage{Text: "Ciao_3"})
-	//go slack.PostWebhook(command.ResponseURL, &slack.WebhookMessage{Text: "Ciao_4"})
-	sendResponse(command)
 }
 
 type InChannelResponse struct {
@@ -237,14 +239,18 @@ func githubPrHandler(w http.ResponseWriter, r *http.Request) {
 	if jsonErr != nil {
 		log.Fatal(jsonErr)
 	}
-	option := makeMessage(&t.PR)
-	log.Println(option)
-	for _, reviewer := range t.PR.Assignees {
-		user, err := getUserGithubName(*reviewer.Login)
-		if err != nil {
-			log.Println(err)
+	log.Println(t.Action)
+	log.Println(t.PR.State != github.String("closed"))
+	if t.PR.State != github.String("closed") {
+		option := makeMessage(&t.PR)
+		log.Println(option)
+		for _, reviewer := range t.PR.Assignees {
+			user, err := getUserGithubName(*reviewer.Login)
+			if err != nil {
+				log.Println(err)
+			}
+			sendMessage(user.SlackChannelId, *option)
 		}
-		sendMessage(user.SlackChannelId, *option)
 	}
 
 }
@@ -271,6 +277,7 @@ func getUserGithubName(login string) (SubscribedUser, error) {
 
 func registerEndpoints() {
 	http.HandleFunc("/message", commandHandler)
+	http.HandleFunc("/send-response", sendResponseHandler)
 	http.HandleFunc("/subscribe", subscribeHandler)
 	http.HandleFunc("/github-pr", githubPrHandler)
 	http.HandleFunc("/", pingHandler)
