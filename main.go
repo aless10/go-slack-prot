@@ -17,12 +17,14 @@ type configuration struct {
 	SlackToken    string `env:"SLACK_TOKEN"`
 	SlackBotToken string `env:"SLACK_BOT_ACCESS_TOKEN"`
 	GithubToken   string `env:"GITHUB_TOKEN"`
+	Organization  string `env:"ORGANIZATION"`
 }
 
 var Config = configuration{
 	SlackToken:    os.Getenv("SLACK_TOKEN"),
 	SlackBotToken: os.Getenv("SLACK_BOT_ACCESS_TOKEN"),
 	GithubToken:   os.Getenv("GITHUB_TOKEN"),
+	Organization:  os.Getenv("ORGANIZATION"),
 }
 
 var Api = slack.New(Config.SlackBotToken)
@@ -46,15 +48,6 @@ type GithubResponse struct {
 
 var ProtSubscribedUsers = make(map[string]SubscribedUser)
 
-type ProtSubscribedUsersMap map[string]SubscribedUser
-
-
-func subscribeUser() *ProtSubscribedUsersMap {
-
-
-}
-
-
 type SubscribedUser struct {
 	SlackUserID    string
 	SlackChannelId string
@@ -63,9 +56,7 @@ type SubscribedUser struct {
 
 func okJSONHandler(rw http.ResponseWriter, r *http.Request) error {
 	rw.Header().Set("Content-Type", "application/json")
-	response, _ := json.Marshal(slack.SlackResponse{
-		Ok: true,
-	})
+	response, _ := json.Marshal(InChannelResponse{"Request Received!", "in_channel"})
 	_, err := rw.Write(response)
 
 	return err
@@ -80,6 +71,7 @@ func sendResponse(command slack.SlashCommand) {
 
 	// 1. For all the repos
 	repos, _, err := githubClient.Repositories.List(context.Background(), "", nil)
+	//repos, _, err := githubClient.Repositories.ListByOrg(context.Background(), Config.Organization, nil)
 	for _, repo := range repos {
 		owner := repo.Owner.Login
 		repoName := repo.Name
@@ -89,55 +81,46 @@ func sendResponse(command slack.SlashCommand) {
 			return
 		}
 		for _, pull := range pullsList {
-			// TODO remove this assignement, range over pull.RequestedReviewers
+			// TODO remove this assignment, range over pull.RequestedReviewers
 			for _, assignee := range pull.Assignees {
 				log.Println(assignee)
-
 				if err != nil {
 					log.Println(err)
 					return
 				}
-
 				if *assignee.Login == user.GithubUser {
 					log.Println("Yes")
 					response.PullRequestList = append(response.PullRequestList, pull)
 				}
-
 			}
-
 		}
 
 	}
-	log.Println(response.PullRequestList)
-	//msgOptionText := fmt.Sprintf("These are PR that you have to review")
-	msgOptions, msgAttachments := makeMessage(response.PullRequestList[0])
-	//msgOptions := slack.MsgOptionText(msgOptionText, true)
-	//msgAttText := fmt.Sprintf("Repo")
-	//msgAttachments := slack.MsgOptionAttachments(slack.Attachment{Title: "Title",
-	//	Text:  msgAttText,
-	//	Color: "green",
-	//})
-	sendMessage(user.SlackChannelId, *msgOptions, *msgAttachments)
+	msgOptionText := fmt.Sprintf("Here are your PR")
+	msgOptionTitle := slack.MsgOptionText(msgOptionText, true)
+	sendMessage(user.SlackChannelId, msgOptionTitle, *makeMessage(response.PullRequestList ...))
+
 }
 
 func commandHandler(w http.ResponseWriter, r *http.Request) {
 	// 0. Return the response to slack
-	err := okJSONHandler(w, r)
-
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
+	w.WriteHeader(http.StatusOK)
+	go okJSONHandler(w, r)
 	command, err := slack.SlashCommandParse(r)
+	//go slack.PostWebhook(command.ResponseURL, &slack.WebhookMessage{Text: "Ciao"})
+	//time.Sleep(time.Second * 5)
+	//go slack.PostWebhook(command.ResponseURL, &slack.WebhookMessage{Text: "Ciao_2"})
+	//err = okJSONHandler(w, r)
 
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	log.Println(command)
+	log.Println(command.ResponseURL)
 
-	go sendResponse(command)
-
+	//go slack.PostWebhook(command.ResponseURL, &slack.WebhookMessage{Text: "Ciao_3"})
+	//go slack.PostWebhook(command.ResponseURL, &slack.WebhookMessage{Text: "Ciao_4"})
+	sendResponse(command)
 }
 
 type InChannelResponse struct {
@@ -201,40 +184,45 @@ func pingHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-
 type GithubPResponse struct {
-	Action string      `json:"action"`
+	Action string             `json:"action"`
 	PR     github.PullRequest `json:"pull_request"`
 }
 
-func makeMessage(pr *github.PullRequest) (*slack.MsgOption, *slack.MsgOption) {
-	labelInfo := github.Label{}
-	if len(pr.Labels) == 0 {
-		// Todo fix this assignment
-		*labelInfo.Name = fmt.Sprintf("No Label Added")
-		*labelInfo.Color = fmt.Sprintf(`green`)
-	} else {
-		labelInfo.Name = pr.Labels[0].Name
-		labelInfo.Color = pr.Labels[0].Color
+func makeMessage(pr ...*github.PullRequest) *slack.MsgOption {
+	var atts []slack.Attachment
+	for _, pull := range pr {
+		labelInfo := github.Label{}
+		if len(pull.Labels) == 0 {
+			// Todo fix this assignment
+			pull.Labels = append(pull.Labels, &github.Label{Name: github.String("No Label Added"), Color: github.String("green"),})
+		}
+		labelInfo.Name = pull.Labels[0].Name
+		labelInfo.Color = pull.Labels[0].Color
+		msgOptionText := fmt.Sprintf("%s requests your review on this PR", *pull.User.Login)
+		msgAttTitle := fmt.Sprintf("%s -> %s", *pull.Title, *pull.Base.Repo.Name)
+		msgAttText := fmt.Sprintf("%s\n Label: %s", *pull.HTMLURL, *labelInfo.Name)
+		log.Println(pull)
+		atts = append(atts, slack.Attachment{Title: msgAttTitle,
+			Text:       msgAttText,
+			Color:      *labelInfo.Color,
+			AuthorName: msgOptionText,
+		})
+
 	}
 
-	msgOptionText := fmt.Sprintf("%s requests your review on this PR", *pr.User.Login)
-	msgOptions := slack.MsgOptionText(msgOptionText, true)
-	msgAttText := fmt.Sprintf("%s\n Repo: %s\n Label: %s", *pr.Base.Repo.Name, *pr.HTMLURL, *labelInfo.Name)
-	msgAttachments := slack.MsgOptionAttachments(slack.Attachment{Title: *pr.Title,
-		Text:  msgAttText,
-		Color: *labelInfo.Color,
-	})
-	return &msgOptions, &msgAttachments
+	msgAttachments := slack.MsgOptionAttachments(atts...)
+	return &msgAttachments
 }
 
 func sendMessage(channelId string, options ...slack.MsgOption) {
 	respChannel, _, err := Api.PostMessage(channelId, options...)
 	if err != nil {
 		log.Println(err)
-		return
+
 	}
 	log.Println(respChannel)
+
 }
 
 func githubPrHandler(w http.ResponseWriter, r *http.Request) {
@@ -249,16 +237,16 @@ func githubPrHandler(w http.ResponseWriter, r *http.Request) {
 	if jsonErr != nil {
 		log.Fatal(jsonErr)
 	}
-	option, attachments := makeMessage(&t.PR)
+	option := makeMessage(&t.PR)
 	log.Println(option)
-
 	for _, reviewer := range t.PR.Assignees {
 		user, err := getUserGithubName(*reviewer.Login)
 		if err != nil {
 			log.Println(err)
 		}
-		go sendMessage(user.SlackChannelId, *option, *attachments)
+		sendMessage(user.SlackChannelId, *option)
 	}
+
 }
 
 func getUserByID(id string) (SubscribedUser, error) {
