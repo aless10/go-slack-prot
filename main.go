@@ -102,14 +102,6 @@ func sendResponse(command slack.SlashCommand) {
 
 }
 
-func sendResponseHandler(w http.ResponseWriter, r *http.Request) {
-	log.Println("HEre we are baby")
-	command, err := slack.SlashCommandParse(r)
-	if err != nil {
-		log.Println(err)
-	}
-	log.Println(command)
-}
 
 func commandHandler(w http.ResponseWriter, r *http.Request) {
 	// 0. Return the response to slack
@@ -196,7 +188,6 @@ func makeMessage(pr ...*github.PullRequest) *slack.MsgOption {
 	for _, pull := range pr {
 		labelInfo := github.Label{}
 		if len(pull.Labels) == 0 {
-			// Todo fix this assignment
 			pull.Labels = append(pull.Labels, &github.Label{Name: github.String("No Label Added"), Color: github.String("green"),})
 		}
 		labelInfo.Name = pull.Labels[0].Name
@@ -277,7 +268,6 @@ func getUserGithubName(login string) (SubscribedUser, error) {
 
 func registerEndpoints() {
 	http.HandleFunc("/message", commandHandler)
-	http.HandleFunc("/send-response", sendResponseHandler)
 	http.HandleFunc("/subscribe", subscribeHandler)
 	http.HandleFunc("/github-pr", githubPrHandler)
 	http.HandleFunc("/", pingHandler)
