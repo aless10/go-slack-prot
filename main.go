@@ -56,10 +56,47 @@ type SubscribedUser struct {
 
 func okJSONHandler(rw http.ResponseWriter, r *http.Request) error {
 	rw.Header().Set("Content-Type", "application/json")
-	response, _ := json.Marshal(InChannelResponse{"Request Received!", "in_channel"})
+	response, _ := json.Marshal(InChannelResponse{"Request Received!", "in_channel", []slack.Attachment{}})
 	_, err := rw.Write(response)
 
 	return err
+}
+
+func sendResponsePrList(command slack.SlashCommand) {
+	user, err := getUserByID(command.UserID)
+	if err != nil {
+		log.Fatalf("User with ID %s not found", command.UserID)
+	}
+
+	// 1. For all the repos
+	repos, _, err := githubClient.Repositories.List(context.Background(), "", nil)
+	//repos, _, err := githubClient.Repositories.ListByOrg(context.Background(), Config.Organization, nil)
+
+	msgText := fmt.Sprintf("Here are your Repos")
+	msgPreText := fmt.Sprintf("Select the one you want to review")
+	attAction := slack.AttachmentAction{Name: fmt.Sprintf("GoGet"),
+		Text: fmt.Sprintf("Select a repo"),
+		Type: fmt.Sprintf("select"),
+	}
+	for _, repo := range repos {
+		attAction.Options = append(attAction.Options,
+			slack.AttachmentActionOption{Text: *repo.FullName,
+				Value: *repo.Name})
+	}
+	buttonAction := slack.AttachmentAction{
+		Name: "confirm",
+		Text: "GO",
+		Type: "button",
+		Value: "",
+	}
+	msgAtt := slack.Attachment{
+		Text:    msgText,
+		Pretext: msgPreText,
+		Color:   "#3AA3E3",
+		Actions: []slack.AttachmentAction{attAction, buttonAction},
+	}
+	sendMessage(user.SlackChannelId, slack.MsgOptionAttachments(msgAtt))
+
 }
 
 func sendResponse(command slack.SlashCommand) {
@@ -102,6 +139,19 @@ func sendResponse(command slack.SlashCommand) {
 
 }
 
+func repoListHandler(w http.ResponseWriter, r *http.Request) {
+	// 0. Return the response to slack
+	defer r.Body.Close()
+	err := okJSONHandler(w, r)
+	command, err := slack.SlashCommandParse(r)
+
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	go sendResponsePrList(command)
+
+}
 
 func commandHandler(w http.ResponseWriter, r *http.Request) {
 	// 0. Return the response to slack
@@ -118,8 +168,9 @@ func commandHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 type InChannelResponse struct {
-	Text         string `json:"text"`
-	ResponseType string `json:"response_type"`
+	Text         string             `json:"text"`
+	ResponseType string             `json:"response_type"`
+	Attachments  []slack.Attachment `json:"attachments"`
 }
 
 func subscribeHandler(w http.ResponseWriter, r *http.Request) {
@@ -141,7 +192,7 @@ func subscribeHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		ProtSubscribedUsers[newUser.SlackUserID] = newUser
-		response := InChannelResponse{"User added", "in_channel"}
+		response := InChannelResponse{"User " + newUser.GithubUser + " added", "in_channel", []slack.Attachment{}}
 		js, err := json.Marshal(response)
 		w.Header().Set("Content-Type", "application/json")
 		_, err = w.Write(js)
@@ -152,7 +203,7 @@ func subscribeHandler(w http.ResponseWriter, r *http.Request) {
 	} else {
 		w.Header().Set("Content-Type", "application/json")
 		msgText := fmt.Sprintf("%s Already subscribed", user.GithubUser)
-		response := InChannelResponse{msgText, "in_channel"}
+		response := InChannelResponse{msgText, "in_channel", []slack.Attachment{}}
 		js, err := json.Marshal(response)
 		_, err = w.Write(js)
 		if err != nil {
@@ -163,7 +214,7 @@ func subscribeHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func pingHandler(w http.ResponseWriter, r *http.Request) {
-	response := InChannelResponse{"pong", "in_channel"}
+	response := InChannelResponse{"pong", "in_channel", []slack.Attachment{}}
 	js, err := json.Marshal(response)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -218,6 +269,35 @@ func sendMessage(channelId string, options ...slack.MsgOption) {
 
 }
 
+// SlashCommandParse will parse the request of the slash command
+func listResponseParse(r *http.Request) (s slack.InteractionCallback, err error) {
+	if err = r.ParseForm(); err != nil {
+		return s, err
+	}
+	s.Token = r.PostForm.Get("token")
+	s.CallbackID = r.PostForm.Get("callback_id")
+	//s.Message = r.PostForm.Get("message")
+	//s.Name = r.PostForm.Get("name")
+	//s.Channel = r.PostForm.Get("channel")
+	//s.OriginalMessage = r.PostForm.Get("original_message")
+	//s.User = r.PostForm.Get("user")
+	s.ResponseURL = r.PostForm.Get("response_url")
+	s.TriggerID = r.PostForm.Get("trigger_id")
+	return s, nil
+}
+
+
+func listResponseHandler(w http.ResponseWriter, r *http.Request) {
+	defer r.Body.Close()
+	err := okJSONHandler(w, r)
+	response, err := listResponseParse(r)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	log.Println(response)
+}
+
 func githubPrHandler(w http.ResponseWriter, r *http.Request) {
 	defer r.Body.Close()
 	var t GithubPResponse
@@ -267,7 +347,9 @@ func getUserGithubName(login string) (SubscribedUser, error) {
 }
 
 func registerEndpoints() {
-	http.HandleFunc("/message", commandHandler)
+	http.HandleFunc("/pr-list", commandHandler)
+	http.HandleFunc("/repo-list", repoListHandler)
+	http.HandleFunc("/list-response", listResponseHandler)
 	http.HandleFunc("/subscribe", subscribeHandler)
 	http.HandleFunc("/github-pr", githubPrHandler)
 	http.HandleFunc("/", pingHandler)
