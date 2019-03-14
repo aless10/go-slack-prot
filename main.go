@@ -83,17 +83,12 @@ func sendResponsePrList(command slack.SlashCommand) {
 			slack.AttachmentActionOption{Text: *repo.FullName,
 				Value: *repo.Name})
 	}
-	buttonAction := slack.AttachmentAction{
-		Name: "confirm",
-		Text: "GO",
-		Type: "button",
-		Value: "",
-	}
 	msgAtt := slack.Attachment{
+		CallbackID: "GoGet",
 		Text:    msgText,
 		Pretext: msgPreText,
 		Color:   "#3AA3E3",
-		Actions: []slack.AttachmentAction{attAction, buttonAction},
+		Actions: []slack.AttachmentAction{attAction},
 	}
 	sendMessage(user.SlackChannelId, slack.MsgOptionAttachments(msgAtt))
 
@@ -139,31 +134,24 @@ func sendResponse(command slack.SlashCommand) {
 
 }
 
-func repoListHandler(w http.ResponseWriter, r *http.Request) {
-	// 0. Return the response to slack
-	defer r.Body.Close()
-	err := okJSONHandler(w, r)
-	command, err := slack.SlashCommandParse(r)
-
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	go sendResponsePrList(command)
-
-}
 
 func commandHandler(w http.ResponseWriter, r *http.Request) {
 	// 0. Return the response to slack
 	defer r.Body.Close()
 	err := okJSONHandler(w, r)
 	command, err := slack.SlashCommandParse(r)
-
+	
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	go sendResponse(command)
+
+	switch command.Command {
+	case "/prot":
+		go sendResponse(command)
+	case "/protlist":
+		go sendResponsePrList(command)
+	}
 
 }
 
@@ -270,19 +258,21 @@ func sendMessage(channelId string, options ...slack.MsgOption) {
 }
 
 // SlashCommandParse will parse the request of the slash command
-func listResponseParse(r *http.Request) (s slack.InteractionCallback, err error) {
-	if err = r.ParseForm(); err != nil {
+func listResponseParse(r *http.Request) (lightInteractionCallback, error) {
+	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	var rBody slack.InteractionCallback
+	var s lightInteractionCallback
+	if err := r.ParseForm(); err != nil {
 		return s, err
 	}
-	s.Token = r.PostForm.Get("token")
-	s.CallbackID = r.PostForm.Get("callback_id")
-	//s.Message = r.PostForm.Get("message")
-	//s.Name = r.PostForm.Get("name")
-	//s.Channel = r.PostForm.Get("channel")
-	//s.OriginalMessage = r.PostForm.Get("original_message")
-	//s.User = r.PostForm.Get("user")
-	s.ResponseURL = r.PostForm.Get("response_url")
-	s.TriggerID = r.PostForm.Get("trigger_id")
+	err := json.Unmarshal([]byte(r.PostForm["payload"][0]), &rBody)
+	if err != nil {
+		return s, err
+	}
+
+	s.User = rBody.User
+	s.SelectedRepo = rBody.ActionCallback.Actions[0].SelectedOptions[0].Value
+
 	return s, nil
 }
 
@@ -296,7 +286,52 @@ func listResponseHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	log.Println(response)
+	go sendSingleRepoResponse(response)
 }
+
+type lightInteractionCallback struct {
+	SelectedRepo string
+	User slack.User
+}
+
+func sendSingleRepoResponse(r lightInteractionCallback) {
+	user, err := getUserByID(r.User.ID)
+	if err != nil {
+		log.Fatalf("User with ID %s not found", r.User.ID)
+	}
+	response := GithubResponse{SlackUser: &user}
+	pullsList, _, err := githubClient.PullRequests.List(context.Background(), "aless10", r.SelectedRepo, &github.PullRequestListOptions{State: "open"})
+	if err != nil {
+		log.Println(err)
+		return
+	}
+
+	msgOptionText := fmt.Sprintf("Here are your PR of Repo %s", r.SelectedRepo)
+
+	if len(pullsList) == 0 {
+		msgOptionText = fmt.Sprintf("No PR to review for Repo %s", r.SelectedRepo)
+	}
+
+	for _, pull := range pullsList {
+		// TODO remove this assignment, range over pull.RequestedReviewers
+		for _, assignee := range pull.Assignees {
+			log.Println(assignee)
+			if err != nil {
+				log.Println(err)
+				return
+			}
+			if *assignee.Login == user.GithubUser {
+				log.Println("Yes")
+				response.PullRequestList = append(response.PullRequestList, pull)
+			}
+		}
+	}
+
+	msgOptionTitle := slack.MsgOptionText(msgOptionText, true)
+	sendMessage(user.SlackChannelId, msgOptionTitle, *makeMessage(response.PullRequestList ...))
+
+}
+
 
 func githubPrHandler(w http.ResponseWriter, r *http.Request) {
 	defer r.Body.Close()
@@ -346,7 +381,7 @@ func getUserGithubName(login string) (SubscribedUser, error) {
 
 func registerEndpoints() {
 	http.HandleFunc("/pr-list", commandHandler)
-	http.HandleFunc("/repo-list", repoListHandler)
+	http.HandleFunc("/repo-list", commandHandler)
 	http.HandleFunc("/list-response", listResponseHandler)
 	http.HandleFunc("/subscribe", subscribeHandler)
 	http.HandleFunc("/github-pr", githubPrHandler)
