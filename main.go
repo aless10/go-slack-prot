@@ -310,9 +310,7 @@ func githubPrHandler(w http.ResponseWriter, r *http.Request) {
 	if jsonErr != nil {
 		log.Fatal(jsonErr)
 	}
-	log.Println(t.Action)
-	log.Println(t.PR.State != github.String("closed"))
-	if t.PR.State != github.String("closed") {
+	if *t.PR.State != "closed" {
 		option := makeMessage(&t.PR)
 		log.Println(option)
 		for _, reviewer := range t.PR.Assignees {
