@@ -18,7 +18,7 @@ func GetUserByID(id string) (SubscribedUser, error) {
 
 }
 
-func getUserGithubName(login string) (SubscribedUser, error) {
+func GetUserGithubName(login string) (SubscribedUser, error) {
 
 	for _, subscribedUser := range ProtSubscribedUsers {
 		user, err := GetUserByID(subscribedUser.SlackUserID)
@@ -29,8 +29,8 @@ func getUserGithubName(login string) (SubscribedUser, error) {
 			return user, nil
 		}
 	}
-	nullUser := SubscribedUser{}
-	return nullUser, nil
+
+	return SubscribedUser{}, nil
 }
 
 func createGithubClient() *github.Client {

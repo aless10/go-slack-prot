@@ -74,7 +74,7 @@ func sendResponse(command slack.SlashCommand) {
 		}
 		for _, pull := range pullsList {
 			// TODO remove this assignment, range over pull.RequestedReviewers
-			for _, assignee := range pull.Assignees {
+			for _, assignee := range pull.RequestedReviewers {
 				log.Println(assignee)
 				if err != nil {
 					log.Println(err)
@@ -179,7 +179,7 @@ func sendSingleRepoResponse(r lightInteractionCallback) {
 
 	for _, pull := range pullsList {
 		// TODO remove this assignment, range over pull.RequestedReviewers
-		for _, assignee := range pull.Assignees {
+		for _, assignee := range pull.RequestedReviewers {
 			log.Println(assignee)
 			if err != nil {
 				log.Println(err)

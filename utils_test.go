@@ -1,6 +1,8 @@
 package main
 
-import "testing"
+import (
+	"testing"
+)
 
 func TestGetUserByIDNotSubscribed(t *testing.T) {
 	_, err := GetUserByID("testID")
@@ -25,5 +27,34 @@ func TestGetUserByIDSubscribed(t *testing.T) {
 
 	if user.SlackUserID != "testID" {
 		t.Errorf("SlackUserID = %s; want testID", user.SlackUserID)
+	}
+}
+
+
+func TestGetUserGithubNameNoUser (t *testing.T) {
+
+	emptyUser := SubscribedUser{}
+	user, err := GetUserGithubName("NoUseForAName")
+	if user != emptyUser || err != nil {
+		t.Errorf("user or err are not nil")
+	}
+}
+
+func TestGetUserGithubName (t *testing.T) {
+
+	ProtSubscribedUsers["testID"] = SubscribedUser{
+		SlackUserID:   "testID",
+		SlackUserName: "testUserName",
+		SlackChannelId: "testChannelID",
+		GithubUser: "testGithubUser",
+	}
+
+	user, err := GetUserGithubName("testGithubUser")
+	if err != nil {
+		t.Errorf("Expected User with SlackUserID = testID, got err %s", err)
+	}
+
+	if user.SlackUserID != "testID" {
+		t.Errorf("Expected User with SlackUserID = testID, got %s", user.SlackUserID)
 	}
 }
