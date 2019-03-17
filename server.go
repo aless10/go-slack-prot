@@ -6,7 +6,7 @@ import (
 	"strings"
 )
 
-func registerEndpoints() {
+func init() {
 	http.HandleFunc("/pr-list", commandHandler)
 	http.HandleFunc("/repo-list", commandHandler)
 	http.HandleFunc("/list-response", listResponseHandler)
@@ -17,7 +17,6 @@ func registerEndpoints() {
 
 // RunServer This is the server runner
 func RunServer() (err error) {
-	registerEndpoints()
 	err = http.ListenAndServe(strings.Join([]string{ServerConfig.Host, ServerConfig.Port}, ":"), nil)
 	if err != nil {
 		log.Fatal(err)

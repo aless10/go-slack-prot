@@ -36,6 +36,7 @@ var ProtSubscribedUsers = make(map[string]SubscribedUser)
 
 type SubscribedUser struct {
 	SlackUserID    string
+	SlackUserName  string
 	SlackChannelId string
 	GithubUser     string
 }
@@ -44,6 +45,6 @@ func main() {
 	log.Printf("Running The server on %s:%s\n", ServerConfig.Host, ServerConfig.Port)
 	err := RunServer()
 	if err != nil {
-		log.Fatal("Error while running the server %T", err)
+		log.Fatal("Error while running the server ", err)
 	}
 }

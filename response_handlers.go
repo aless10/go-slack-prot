@@ -23,7 +23,7 @@ type lightInteractionCallback struct {
 var githubClient = createGithubClient()
 
 func sendResponsePrList(command slack.SlashCommand) {
-	user, err := getUserByID(command.UserID)
+	user, err := GetUserByID(command.UserID)
 	if err != nil {
 		log.Fatalf("User with ID %s not found", command.UserID)
 	}
@@ -55,7 +55,7 @@ func sendResponsePrList(command slack.SlashCommand) {
 }
 
 func sendResponse(command slack.SlashCommand) {
-	user, err := getUserByID(command.UserID)
+	user, err := GetUserByID(command.UserID)
 	if err != nil {
 		log.Fatalf("User with ID %s not found", command.UserID)
 	}
@@ -160,7 +160,7 @@ func listResponseParse(r *http.Request) (lightInteractionCallback, error) {
 }
 
 func sendSingleRepoResponse(r lightInteractionCallback) {
-	user, err := getUserByID(r.User.ID)
+	user, err := GetUserByID(r.User.ID)
 	if err != nil {
 		log.Fatalf("User with ID %s not found", r.User.ID)
 	}
