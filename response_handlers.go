@@ -22,14 +22,9 @@ type lightInteractionCallback struct {
 
 var githubClient = createGithubClient()
 
-func sendResponsePrList(command slack.SlashCommand) {
-	user, err := GetUserByID(command.UserID)
-	if err != nil {
-		Error.Printf("User with ID %s not found", command.UserID)
-	}
-
+func sendResponsePrList(user SubscribedUser) {
 	// 1. For all the repos
-	repos, _, err := githubClient.Repositories.List(context.Background(), "", nil)
+	repos, _, _ := githubClient.Repositories.List(context.Background(), "", nil)
 	//repos, _, err := githubClient.Repositories.ListByOrg(context.Background(), Config.Organization, nil)
 
 	msgText := fmt.Sprintf("Here are your Repos")
@@ -54,15 +49,11 @@ func sendResponsePrList(command slack.SlashCommand) {
 
 }
 
-func sendResponse(command slack.SlashCommand) {
-	user, err := GetUserByID(command.UserID)
-	if err != nil {
-		Error.Printf("User with ID %s not found", command.UserID)
-	}
+func sendResponse(user SubscribedUser) {
 	response := GithubResponse{SlackUser: &user}
 
 	// 1. For all the repos
-	repos, _, err := githubClient.Repositories.List(context.Background(), "", nil)
+	repos, _, _ := githubClient.Repositories.List(context.Background(), "", nil)
 	//repos, _, err := githubClient.Repositories.ListByOrg(context.Background(), Config.Organization, nil)
 	for _, repo := range repos {
 		pullsList, _, err := githubClient.PullRequests.List(context.Background(), *repo.Owner.Login, *repo.Name, &github.PullRequestListOptions{State: "open"})

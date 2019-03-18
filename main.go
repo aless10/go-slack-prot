@@ -43,7 +43,6 @@ type SubscribedUser struct {
 }
 
 func main() {
-	log.Println(LogFile)
 	logFile, err := os.OpenFile(LogFile,
 		os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0666)
 	if err != nil {
@@ -51,9 +50,10 @@ func main() {
 	}
 	initLogs(logFile)
 	defer logFile.Close()
-	log.Printf("Running The server on %s:%s\n", ServerConfig.Host, ServerConfig.Port)
+	Info.Printf("Running The server on %s:%s\n", ServerConfig.Host, ServerConfig.Port)
+	Info.Printf("Log File: %s", LogFile)
 	serverErr := RunServer()
 	if serverErr != nil {
-		log.Fatalf("Error while running the server %s", err)
+		Error.Printf("Error while running the server %s", err)
 	}
 }

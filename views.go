@@ -16,6 +16,21 @@ func okJSONHandler(rw http.ResponseWriter, r *http.Request) error {
 	return err
 }
 
+func koJSONHandler(rw http.ResponseWriter, r *http.Request) error {
+	rw.Header().Set("Content-Type", "application/json")
+	response, _ := json.Marshal(InChannelResponse{fmt.Sprintf("Something went wrong: %d!", http.StatusInternalServerError), "in_channel", []slack.Attachment{}})
+	_, err := rw.Write(response)
+
+	return err
+}
+
+func UserNotSubscribedHandler(channelID string) {
+	msg := fmt.Sprintf("You are not subscribed. Please type /subscribe [your-github-username]")
+	msgOption := slack.MsgOptionText(msg, true)
+	sendMessage(channelID, msgOption)
+
+}
+
 func pingHandler(w http.ResponseWriter, r *http.Request) {
 	response := InChannelResponse{"pong", "in_channel", []slack.Attachment{}}
 	js, err := json.Marshal(response)
@@ -53,7 +68,7 @@ func subscribeHandler(w http.ResponseWriter, r *http.Request) {
 		_, err = w.Write(js)
 		if err != nil {
 			Error.Printf(err.Error(), "while writing response. Returning", http.StatusInternalServerError)
-			return
+			koJSONHandler(w, r)
 		}
 	} else {
 		w.Header().Set("Content-Type", "application/json")
@@ -97,32 +112,40 @@ func githubPrHandler(w http.ResponseWriter, r *http.Request) {
 func commandHandler(w http.ResponseWriter, r *http.Request) {
 	// 0. Return the response to slack
 	defer r.Body.Close()
-	err := okJSONHandler(w, r)
 	command, err := slack.SlashCommandParse(r)
-
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
+		Error.Printf("Error while parsing the command: %s. Returning status error %d", err.Error(), http.StatusInternalServerError)
+		koJSONHandler(w, r)
+	} else {
+		err := okJSONHandler(w, r)
+		user, err := GetUserByID(command.UserID)
+		if err != nil {
+			Error.Printf("User with ID %s not found", command.UserID)
+			UserNotSubscribedHandler(command.ChannelID)
 
-	switch command.Command {
-	case "/prot":
-		go sendResponse(command)
-	case "/protlist":
-		go sendResponsePrList(command)
-	}
+		} else {
+			switch command.Command {
+			case "/prot":
+				go sendResponse(user)
+			case "/protlist":
+				go sendResponsePrList(user)
 
+			}
+		}
+	}
 }
 
 func listResponseHandler(w http.ResponseWriter, r *http.Request) {
 	defer r.Body.Close()
-	err := okJSONHandler(w, r)
 	response, err := listResponseParse(r)
 	if err != nil {
 		Error.Printf(err.Error(), "while parsing command. Returning", http.StatusInternalServerError)
-		return
+		koJSONHandler(w, r)
+	} else {
+		okJSONHandler(w, r)
+		Info.Println(response)
+		go sendSingleRepoResponse(response)
+
 	}
 
-	Info.Println(response)
-	go sendSingleRepoResponse(response)
 }
