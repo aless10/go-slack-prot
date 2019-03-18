@@ -25,7 +25,7 @@ var githubClient = createGithubClient()
 func sendResponsePrList(command slack.SlashCommand) {
 	user, err := GetUserByID(command.UserID)
 	if err != nil {
-		log.Fatalf("User with ID %s not found", command.UserID)
+		Error.Print("Not found User with ID ", command.UserID)
 	}
 
 	// 1. For all the repos
@@ -57,7 +57,7 @@ func sendResponsePrList(command slack.SlashCommand) {
 func sendResponse(command slack.SlashCommand) {
 	user, err := GetUserByID(command.UserID)
 	if err != nil {
-		log.Fatalf("User with ID %s not found", command.UserID)
+		Error.Print("Not found User with ID ", command.UserID)
 	}
 	response := GithubResponse{SlackUser: &user}
 
@@ -69,15 +69,15 @@ func sendResponse(command slack.SlashCommand) {
 		repoName := repo.Name
 		pullsList, _, err := githubClient.PullRequests.List(context.Background(), *owner, *repoName, &github.PullRequestListOptions{State: "open"})
 		if err != nil {
-			log.Println(err)
+			Error.Println(err)
 			return
 		}
 		for _, pull := range pullsList {
 			// TODO remove this assignment, range over pull.RequestedReviewers
-			for _, assignee := range pull.RequestedReviewers {
-				log.Println(assignee)
+			for _, assignee := range pull.Assignees {
+				Info.Println(assignee)
 				if err != nil {
-					log.Println(err)
+					Error.Println(err)
 					return
 				}
 				if *assignee.Login == user.GithubUser {
@@ -117,7 +117,7 @@ func makeMessage(pr ...*github.PullRequest) *slack.MsgOption {
 		msgOptionText := fmt.Sprintf("%s requests your review on this PR", *pull.User.Login)
 		msgAttTitle := fmt.Sprintf("%s -> %s", *pull.Title, *pull.Base.Repo.Name)
 		msgAttText := fmt.Sprintf("%s\n Label: %s", *pull.HTMLURL, *labelInfo.Name)
-		log.Println(pull)
+		Info.Println("PR: ", pull)
 		atts = append(atts, slack.Attachment{Title: msgAttTitle,
 			Text:       msgAttText,
 			Color:      *labelInfo.Color,
@@ -133,10 +133,10 @@ func makeMessage(pr ...*github.PullRequest) *slack.MsgOption {
 func sendMessage(channelId string, options ...slack.MsgOption) {
 	respChannel, _, err := Api.PostMessage(channelId, options...)
 	if err != nil {
-		log.Println(err)
+		Error.Println(err)
 
 	}
-	log.Println(respChannel)
+	Info.Println("Message sent to ", respChannel)
 
 }
 
@@ -162,7 +162,7 @@ func listResponseParse(r *http.Request) (lightInteractionCallback, error) {
 func sendSingleRepoResponse(r lightInteractionCallback) {
 	user, err := GetUserByID(r.User.ID)
 	if err != nil {
-		log.Fatalf("User with ID %s not found", r.User.ID)
+		Error.Printf("User with ID %s not found", r.User.ID)
 	}
 	response := GithubResponse{SlackUser: &user}
 	pullsList, _, err := githubClient.PullRequests.List(context.Background(), "aless10", r.SelectedRepo, &github.PullRequestListOptions{State: "open"})
@@ -179,14 +179,13 @@ func sendSingleRepoResponse(r lightInteractionCallback) {
 
 	for _, pull := range pullsList {
 		// TODO remove this assignment, range over pull.RequestedReviewers
-		for _, assignee := range pull.RequestedReviewers {
-			log.Println(assignee)
+		for _, assignee := range pull.Assignees {
+			Info.Println(assignee)
 			if err != nil {
 				log.Println(err)
 				return
 			}
 			if *assignee.Login == user.GithubUser {
-				log.Println("Yes")
 				response.PullRequestList = append(response.PullRequestList, pull)
 			}
 		}

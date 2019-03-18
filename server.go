@@ -1,7 +1,6 @@
 package main
 
 import (
-	"log"
 	"net/http"
 	"strings"
 )
@@ -19,7 +18,7 @@ func init() {
 func RunServer() (err error) {
 	err = http.ListenAndServe(strings.Join([]string{ServerConfig.Host, ServerConfig.Port}, ":"), nil)
 	if err != nil {
-		log.Fatal(err)
+		Error.Println(err)
 	}
 	return err
 }

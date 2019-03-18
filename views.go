@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"github.com/nlopes/slack"
 	"io/ioutil"
-	"log"
 	"net/http"
 )
 
@@ -21,14 +20,14 @@ func pingHandler(w http.ResponseWriter, r *http.Request) {
 	response := InChannelResponse{"pong", "in_channel", []slack.Attachment{}}
 	js, err := json.Marshal(response)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		Error.Printf(err.Error(), "while marshalling response. Returning", http.StatusInternalServerError)
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	_, err = w.Write(js)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		Error.Printf(err.Error(), "while writing response. Returning", http.StatusInternalServerError)
 		return
 	}
 }
@@ -36,8 +35,7 @@ func pingHandler(w http.ResponseWriter, r *http.Request) {
 func subscribeHandler(w http.ResponseWriter, r *http.Request) {
 	command, err := slack.SlashCommandParse(r)
 	if err != nil {
-		log.Println(err)
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		Error.Printf(err.Error(), "while parsing command. Returning", http.StatusInternalServerError)
 		return
 	}
 	user, exists := ProtSubscribedUsers[command.UserID]
@@ -47,17 +45,14 @@ func subscribeHandler(w http.ResponseWriter, r *http.Request) {
 			SlackUserID:    command.UserID,
 			SlackChannelId: command.ChannelID,
 			GithubUser:     command.Text,}
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
+
 		ProtSubscribedUsers[newUser.SlackUserID] = newUser
 		response := InChannelResponse{"User " + newUser.GithubUser + " added", "in_channel", []slack.Attachment{}}
 		js, err := json.Marshal(response)
 		w.Header().Set("Content-Type", "application/json")
 		_, err = w.Write(js)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			Error.Printf(err.Error(), "while writing response. Returning", http.StatusInternalServerError)
 			return
 		}
 	} else {
@@ -67,7 +62,7 @@ func subscribeHandler(w http.ResponseWriter, r *http.Request) {
 		js, err := json.Marshal(response)
 		_, err = w.Write(js)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			Error.Printf(err.Error(), "while writing response. Returning", http.StatusInternalServerError)
 			return
 		}
 	}
@@ -78,20 +73,20 @@ func githubPrHandler(w http.ResponseWriter, r *http.Request) {
 	var t GithubPResponse
 	body, err := ioutil.ReadAll(r.Body)
 	if err != nil {
-		log.Fatal(err)
+		Error.Println(err)
 	}
 	jsonErr := json.Unmarshal([]byte(body), &t)
 
 	if jsonErr != nil {
-		log.Fatal(jsonErr)
+		Error.Println(jsonErr)
 	}
 	if *t.PR.State != "closed" {
 		option := makeMessage(&t.PR)
-		log.Println(option)
-		for _, reviewer := range t.PR.RequestedReviewers {
+		Info.Println(option)
+		for _, reviewer := range t.PR.Assignees {
 			user, err := GetUserGithubName(*reviewer.Login)
 			if err != nil {
-				log.Println(err)
+				Error.Println(err)
 			}
 			sendMessage(user.SlackChannelId, *option)
 		}
@@ -124,9 +119,10 @@ func listResponseHandler(w http.ResponseWriter, r *http.Request) {
 	err := okJSONHandler(w, r)
 	response, err := listResponseParse(r)
 	if err != nil {
-		log.Fatal(err)
+		Error.Printf(err.Error(), "while parsing command. Returning", http.StatusInternalServerError)
+		return
 	}
 
-	log.Println(response)
+	Info.Println(response)
 	go sendSingleRepoResponse(response)
 }

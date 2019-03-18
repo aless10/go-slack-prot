@@ -30,6 +30,7 @@ var ServerConfig = ServerConfiguration{
 	Port: os.Getenv("PORT"),
 }
 
+var LogFile = os.Getenv("APP_LOG_FILE")
 var Api = slack.New(Config.SlackBotToken)
 
 var ProtSubscribedUsers = make(map[string]SubscribedUser)
@@ -42,9 +43,17 @@ type SubscribedUser struct {
 }
 
 func main() {
-	log.Printf("Running The server on %s:%s\n", ServerConfig.Host, ServerConfig.Port)
-	err := RunServer()
+	log.Println(LogFile)
+	logFile, err := os.OpenFile(LogFile,
+		os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0666)
 	if err != nil {
-		log.Fatal("Error while running the server ", err)
+		log.Println(err)
+	}
+	initLogs(logFile)
+	defer logFile.Close()
+	log.Printf("Running The server on %s:%s\n", ServerConfig.Host, ServerConfig.Port)
+	serverErr := RunServer()
+	if serverErr != nil {
+		log.Fatalf("Error while running the server %s", err)
 	}
 }

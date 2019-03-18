@@ -5,3 +5,5 @@ cloud.google.com/
 golang.org/
 
 subscribed_users.toml
+
+log/
