@@ -25,7 +25,7 @@ var githubClient = createGithubClient()
 func sendResponsePrList(command slack.SlashCommand) {
 	user, err := GetUserByID(command.UserID)
 	if err != nil {
-		Error.Print("Not found User with ID ", command.UserID)
+		Error.Printf("User with ID %s not found", command.UserID)
 	}
 
 	// 1. For all the repos
@@ -57,7 +57,7 @@ func sendResponsePrList(command slack.SlashCommand) {
 func sendResponse(command slack.SlashCommand) {
 	user, err := GetUserByID(command.UserID)
 	if err != nil {
-		Error.Print("Not found User with ID ", command.UserID)
+		Error.Printf("User with ID %s not found", command.UserID)
 	}
 	response := GithubResponse{SlackUser: &user}
 
@@ -65,9 +65,7 @@ func sendResponse(command slack.SlashCommand) {
 	repos, _, err := githubClient.Repositories.List(context.Background(), "", nil)
 	//repos, _, err := githubClient.Repositories.ListByOrg(context.Background(), Config.Organization, nil)
 	for _, repo := range repos {
-		owner := repo.Owner.Login
-		repoName := repo.Name
-		pullsList, _, err := githubClient.PullRequests.List(context.Background(), *owner, *repoName, &github.PullRequestListOptions{State: "open"})
+		pullsList, _, err := githubClient.PullRequests.List(context.Background(), *repo.Owner.Login, *repo.Name, &github.PullRequestListOptions{State: "open"})
 		if err != nil {
 			Error.Println(err)
 			return
@@ -81,14 +79,18 @@ func sendResponse(command slack.SlashCommand) {
 					return
 				}
 				if *assignee.Login == user.GithubUser {
-					log.Println("Yes")
 					response.PullRequestList = append(response.PullRequestList, pull)
 				}
 			}
 		}
 
 	}
-	msgOptionText := fmt.Sprintf("Here are your PR")
+	var msgOptionText string
+	if len(response.PullRequestList) > 0 {
+		msgOptionText = fmt.Sprintf("Here are your PR!")
+	} else {
+		msgOptionText = fmt.Sprintf("You have no PR to review!")
+	}
 	msgOptionTitle := slack.MsgOptionText(msgOptionText, true)
 	sendMessage(user.SlackChannelId, msgOptionTitle, *makeMessage(response.PullRequestList ...))
 

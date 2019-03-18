@@ -1,8 +1,19 @@
 package main
 
 import (
+	"log"
+	"os"
 	"testing"
 )
+
+func init() {
+	testLogFile, err := os.OpenFile("./log/test_log.log",
+		os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0666)
+	if err != nil {
+		log.Println(err)
+	}
+	initLogs(testLogFile)
+}
 
 func TestGetUserByIDNotSubscribed(t *testing.T) {
 	_, err := GetUserByID("testID")
