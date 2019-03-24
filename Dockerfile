@@ -36,5 +36,6 @@ RUN go install -v ./...
 # This container exposes port 8080 to the outside world
 EXPOSE ${PORT}
 
+WORKDIR $GOPATH/src/prot/cmd
 # Run the executable
-CMD ["src"]
+CMD ["cmd"]
