@@ -97,7 +97,6 @@ func githubPrHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	if *t.PR.State != "closed" {
 		option := makeMessage(&t.PR)
-		Info.Println(option)
 		for _, reviewer := range t.PR.Assignees {
 			user, err := GetUserGithubName(*reviewer.Login)
 			if err != nil {
