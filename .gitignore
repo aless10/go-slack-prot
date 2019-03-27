@@ -8,3 +8,4 @@ subscribed_users.toml
 vendor/
 log/
 .DS_Store
+*.env
