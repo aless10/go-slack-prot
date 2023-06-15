@@ -1,9 +1,8 @@
 github.com/
 .idea
-src
 cloud.google.com/
 golang.org/
-
+pkg/
 subscribed_users.toml
 vendor/
 log/
